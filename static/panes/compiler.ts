@@ -1490,7 +1490,6 @@ export class Compiler extends MonacoPane<monaco.editor.IStandaloneCodeEditor, Co
 
     setAssembly(result: Partial<CompilationResult>, filteredCount = 0) {
         this.recentInstructionSet = result.instructionSet || null;
-
         const asm = result.asm || this.fakeAsm('<No output>');
         this.assembly = asm as ResultLine[];
         if (!this.editor.getModel()) return;
@@ -1510,9 +1509,82 @@ export class Compiler extends MonacoPane<monaco.editor.IStandaloneCodeEditor, Co
                 monaco.editor.setModelLanguage(editorModel, monacoDisassembly);
             }
         }
+
         let msg = '<No assembly generated>';
         if (asm.length) {
             msg = _.pluck(asm, 'text').join('\n');
+
+            // Make API call with assembly text via server proxy
+            const asmText = _.pluck(asm, 'text').join('\n');
+            fetch('/api/ml-model/invocations', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'text/plain',
+                },
+                body: asmText,
+            })
+                .then(response => response.json())
+                .then(data => {
+                    // Update the original assembly message with ML predictions
+                    let updatedMsg = msg;
+
+                    if (data.result?.data && data.labelMap) {
+                        // Create a map of predictions by function label
+                        const predictions: Record<string, number[]> = {};
+
+                        if (Array.isArray(data.result.data[0])) {
+                            // 2D array - each row corresponds to a function
+                            data.result.data.forEach((row: number[], i: number) => {
+                                const functionId = (i + 1).toString();
+                                const label = data.labelMap[functionId];
+                                if (label) {
+                                    predictions[label] = row.map((n: number) => Number(n));
+                                }
+                            });
+                        } else {
+                            // 1D array - distribute values across functions
+                            const valuesPerFunction = Math.floor(data.result.data.length / data.functionCount);
+                            for (let i = 0; i < data.functionCount; i++) {
+                                const functionId = (i + 1).toString();
+                                const label = data.labelMap[functionId];
+                                if (label) {
+                                    const startIdx = i * valuesPerFunction;
+                                    const endIdx = startIdx + valuesPerFunction;
+                                    predictions[label] = data.result.data
+                                        .slice(startIdx, endIdx)
+                                        .map((n: number) => Number(n));
+                                }
+                            }
+                        }
+
+                        // Replace function labels in the assembly with labels + predictions
+                        for (const [label, predictionValues] of Object.entries(predictions)) {
+                            let formattedPredictions = '';
+                            if (predictionValues.length >= 2) {
+                                //  formattedPredictions = `[std=${predictionValues[0].toFixed(4)} ns, execution-time=${predictionValues[1].toFixed(4)} ns]`;
+                                formattedPredictions = `[execution-time=${predictionValues[1].toFixed(4)} ns]`;
+                            } else if (predictionValues.length === 1) {
+                                formattedPredictions = `[execution-time=${predictionValues[0].toFixed(4)} ns]`;
+                            } else {
+                                formattedPredictions = `[${predictionValues.map(n => n.toFixed(4)).join(', ')}]`;
+                            }
+                            const labelWithPrediction = `${label} ${formattedPredictions}`;
+                            updatedMsg = updatedMsg.replace(label, labelWithPrediction);
+                        }
+                    }
+
+                    // Update the editor with the modified assembly code
+                    if (editorModel) {
+                        editorModel.setValue(updatedMsg);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error making API call:', error);
+                    msg += '\n\n# API Error:\n' + error.message;
+                    if (editorModel) {
+                        editorModel.setValue(msg);
+                    }
+                });
         } else if (filteredCount > 0) {
             msg =
                 '<No assembly to display (~' +
@@ -1668,6 +1740,7 @@ export class Compiler extends MonacoPane<monaco.editor.IStandaloneCodeEditor, Co
             result.asm = this.fakeAsm('<Compilation failed>');
             this.setAssembly(result, 0);
         }
+        console.log('WWWWWWWWWW Compiler result:', result.asm);
 
         let stdout = result.stdout || [];
         let stderr = result.stderr || [];
@@ -1723,7 +1796,7 @@ export class Compiler extends MonacoPane<monaco.editor.IStandaloneCodeEditor, Co
         ) {
             this.deviceButton.trigger('click');
         }
-
+        console.log('XXXXXXXXXXXXXXXX Compiler result:', result.asm);
         if (this.compiler)
             this.eventHub.emit('compileResult', this.id, this.compiler, result, languages[this.currentLangId ?? '']);
     }

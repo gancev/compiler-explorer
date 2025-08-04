@@ -37,6 +37,7 @@ export {PvsStudioTool} from './pvs-studio-tool.js';
 export {ReadElfTool} from './readelf-tool.js';
 export {RustFmtTool} from './rustfmt-tool.js';
 export {SonarTool} from './sonar-tool.js';
+export {LociTool} from './loci-tool.js';
 export {StringsTool} from './strings-tool.js';
 export {x86to6502Tool} from './x86to6502-tool.js';
 export {TestingTool} from './testing-tool.js';
