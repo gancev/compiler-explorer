@@ -1562,11 +1562,11 @@ export class Compiler extends MonacoPane<monaco.editor.IStandaloneCodeEditor, Co
                             let formattedPredictions = '';
                             if (predictionValues.length >= 2) {
                                 //  formattedPredictions = `[std=${predictionValues[0].toFixed(4)} ns, execution-time=${predictionValues[1].toFixed(4)} ns]`;
-                                formattedPredictions = `[execution-time=${predictionValues[1].toFixed(4)} ns]`;
+                                formattedPredictions = `[execution-time=${predictionValues[1].toFixed(0)} ns]`;
                             } else if (predictionValues.length === 1) {
-                                formattedPredictions = `[execution-time=${predictionValues[0].toFixed(4)} ns]`;
+                                formattedPredictions = `[execution-time=${predictionValues[0].toFixed(0)} ns]`;
                             } else {
-                                formattedPredictions = `[${predictionValues.map(n => n.toFixed(4)).join(', ')}]`;
+                                formattedPredictions = `[${predictionValues.map(n => n.toFixed(0)).join(', ')}]`;
                             }
                             const labelWithPrediction = `${label} ${formattedPredictions}`;
                             updatedMsg = updatedMsg.replace(label, labelWithPrediction);

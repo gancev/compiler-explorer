@@ -57,7 +57,6 @@ export class LociTool extends BaseTool {
 
     private async callMLModelAPI(asmText: string): Promise<any> {
         try {
-            console.log('XXXX Calling ML model API with assembly text:', asmText);
             // Make the API call to our server endpoint
             const response = await fetch('http://localhost:10240/api/ml-model/invocations', {
                 method: 'POST',
@@ -123,7 +122,10 @@ export class LociTool extends BaseTool {
 
         // Header
         output.push({
-            text: `🔍 ML Model Performance Analysis (${data.functionCount} ASM Block/ Functions)`,
+            text: `🔍 LOCI Performance Analysis (${data.functionCount} ASM Block/ Functions)`,
+        });
+        output.push({
+            text: '*Loop executions estimated based on a single execution path*',
         });
         output.push({text: ''});
 
@@ -148,7 +150,7 @@ export class LociTool extends BaseTool {
 
                         // Format current values
                         // const stdText = currentStd.toFixed(4);
-                        const execTimeText = currentExecTime.toFixed(4);
+                        const execTimeText = currentExecTime.toFixed(0);
 
                         // Calculate performance changes
                         // const stdChange = previousPrediction ?
@@ -174,15 +176,15 @@ export class LociTool extends BaseTool {
                         this.updatePredictionHistory(cleanLabel, currentStd, currentExecTime);
 
                         output.push({
-                            text: `  ${cleanLabel}`,
+                            text: ` ${cleanLabel.padEnd(25)}  ${`${execTimeText} ns`.padEnd(10)}${execTimeChange}`,
                         });
                         // output.push({
                         //     text: `    📈 Standard Deviation: ${stdText} ns${stdChange}`,
                         // });
-                        output.push({
-                            text: `    ⏱️  Execution Time: ${execTimeText} ns${execTimeChange}`,
-                        });
-                        output.push({text: ''});
+                        // output.push({
+                        //     text: `    ⏱️  Execution Time: ${execTimeText} ns${execTimeChange}`,
+                        // });
+                        // output.push({text: ''});
                     }
                 });
             }
@@ -199,13 +201,13 @@ export class LociTool extends BaseTool {
                 output.push({text: ''});
                 output.push({text: '🔄 Performance Changes vs Previous Run:'});
                 output.push({
-                    text: `    🟢 Improved: ${improvedFunctions} functions`,
+                    text: `    🟢 Improved: ${improvedFunctions} functions/ASM blocks`,
                 });
                 output.push({
-                    text: `    🔴 Degraded: ${degradedFunctions} functions`,
+                    text: `    🔴 Degraded: ${degradedFunctions} functions/ASM blocks`,
                 });
                 output.push({
-                    text: `    ≈ Unchanged: ${unchangedFunctions} functions`,
+                    text: `    ≈ Unchanged: ${unchangedFunctions} functions/ASM blocks`,
                 });
             } else {
                 output.push({text: ''});
@@ -259,7 +261,7 @@ export class LociTool extends BaseTool {
             if (!rawAsmString.trim()) {
                 return {
                     id: this.tool.id,
-                    name: this.tool.name || 'LOCI ML Analysis',
+                    name: this.tool.name || 'LOCI Performance Insights',
                     code: 1,
                     languageId: compilationInfo.compiler?.lang || 'unknown',
                     stderr: [],
@@ -282,7 +284,7 @@ export class LociTool extends BaseTool {
             if (!asmText.trim()) {
                 return {
                     id: this.tool.id,
-                    name: this.tool.name || 'LOCI ML Analysis',
+                    name: this.tool.name || 'LOCI Performance Insights',
                     code: 1,
                     languageId: compilationInfo.compiler?.lang || 'unknown',
                     stderr: [],
@@ -299,7 +301,7 @@ export class LociTool extends BaseTool {
 
             return {
                 id: this.tool.id,
-                name: this.tool.name || 'LOCI ML Analysis',
+                name: this.tool.name || 'LOCI Performance Insights',
                 code: 0,
                 languageId: compilationInfo.compiler?.lang || 'unknown',
                 stderr: [],
@@ -310,7 +312,7 @@ export class LociTool extends BaseTool {
             logger.error('LOCI tool error:', error);
             return {
                 id: this.tool.id,
-                name: this.tool.name || 'LOCI ML Analysis',
+                name: this.tool.name || 'LOCI Performance Insights',
                 code: 1,
                 languageId: compilationInfo.compiler?.lang || 'unknown',
                 stderr: [{text: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`}],
