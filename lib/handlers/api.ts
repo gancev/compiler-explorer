@@ -372,7 +372,7 @@ export class ApiHandler {
             logger.debug('Calling ML model API with data:', csvData);
 
             // Make the request to the ML model endpoint
-            const response = await fetch('http://10.10.3.12:8088/invocations', {
+            const response = await fetch('http://10.10.3.12:8080/invocations', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'text/csv',
