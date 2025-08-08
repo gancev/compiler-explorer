@@ -37,6 +37,7 @@ type FunctionPrediction = {
     std: number;
     execTime: number;
     timestamp: number;
+    asmText: string;
 };
 
 type PredictionState = {
@@ -86,11 +87,15 @@ export class LociTool extends BaseTool {
 
     private formatPerformanceChange(current: number, previous: number): string {
         if (previous === 0) return '';
-        const change = ((current - previous) / previous) * 100;
+        // Use the same rounding as execTimeText formatting to avoid false differences
+        const roundedCurrent = Number.parseFloat(current.toFixed(0));
+        const roundedPrevious = Number.parseFloat(previous.toFixed(0));
 
-        if (Math.abs(change) < 0.1) {
+        if (roundedCurrent === roundedPrevious) {
             return ' ≈ (no change)';
         }
+
+        const change = ((roundedCurrent - roundedPrevious) / roundedPrevious) * 100;
         if (change > 0) {
             return ` 🔴 (+${change.toFixed(1)}% slower)`;
         }
@@ -100,11 +105,12 @@ export class LociTool extends BaseTool {
         return '';
     }
 
-    private updatePredictionHistory(functionName: string, std: number, execTime: number): void {
+    private updatePredictionHistory(functionName: string, std: number, execTime: number, asmText: string): void {
         LociTool.predictionHistory[functionName] = {
             std,
             execTime,
             timestamp: Date.now(),
+            asmText,
         };
     }
 
@@ -112,7 +118,111 @@ export class LociTool extends BaseTool {
         return LociTool.predictionHistory[functionName] || null;
     }
 
-    private formatMLResults(data: any): ResultLine[] {
+    private formatAssemblyDiff(currentAsm: string, previousAsm: string): string[] {
+        if (!previousAsm || currentAsm === previousAsm) {
+            return [];
+        }
+
+        const currentLines = currentAsm.split('\n');
+        const previousLines = previousAsm.split('\n');
+
+        // Side-by-side diff with tab separation
+        const diffLines: string[] = [];
+        const maxLines = Math.max(currentLines.length, previousLines.length);
+        let hasChanges = false;
+
+        // Header for side-by-side comparison
+        diffLines.push('    📄 Assembly Changes:');
+        diffLines.push('    Previous\t\t\t\t\t\t\t\t\t\tCurrent');
+        diffLines.push('    --------\t\t\t\t\t\t\t\t\t\t-------');
+
+        for (let i = 0; i < maxLines; i++) {
+            const currentLine = (currentLines[i] || '').trim();
+            const previousLine = (previousLines[i] || '').trim();
+
+            if (currentLine !== previousLine) {
+                hasChanges = true;
+
+                // Pad lines to consistent width for better alignment
+                const prevPadded = previousLine.padEnd(50);
+
+                if (previousLine && !currentLine) {
+                    // Line removed
+                    diffLines.push(`  🔴 ${prevPadded}\t-`);
+                } else if (!previousLine && currentLine) {
+                    // Line added
+                    diffLines.push(`  - \t\t\t\t\t🟢 ${currentLine}`);
+                } else {
+                    // Line changed
+                    diffLines.push(`  🔴 ${prevPadded}\t🟢 ${currentLine}`);
+                }
+            } else if (currentLine && diffLines.length > 3 && diffLines.length < 13) {
+                // Show context lines (same in both)
+                const linePadded = currentLine.padEnd(50);
+                diffLines.push(`    ${linePadded}\t  ${currentLine}`);
+            }
+        }
+
+        if (!hasChanges) {
+            return [];
+        }
+
+        return [
+            ...diffLines.slice(0, 18), // Limit to first 18 lines (including headers)
+            ...(diffLines.length > 18 ? ['    ... (diff truncated)'] : []),
+        ];
+    }
+
+    private extractFunctionAssembly(parsedAsm: any, functionLabel: string, fullAsmText: string): string {
+        // For now, return a portion of the full assembly text
+        // This is a simplified approach - ideally we'd parse function boundaries
+        // but that requires more complex analysis of the parsed ASM structure
+
+        // Try to find function boundaries in the full text
+        const lines = fullAsmText.split('\n');
+        const functionStartPattern = new RegExp(`^${functionLabel}:?\\s*$`, 'i');
+        let startIndex = -1;
+        let endIndex = lines.length;
+
+        // Find start of this function
+        for (let i = 0; i < lines.length; i++) {
+            if (functionStartPattern.test(lines[i].trim())) {
+                startIndex = i;
+                break;
+            }
+        }
+
+        if (startIndex === -1) {
+            // Fallback: return a hash of the function name with some assembly context
+            const hash = functionLabel.split('').reduce((a, b) => {
+                a = (a << 5) - a + b.charCodeAt(0);
+                return a & a;
+            }, 0);
+            const startLine = Math.abs(hash) % Math.max(1, lines.length - 10);
+            return lines.slice(startLine, startLine + 10).join('\n');
+        }
+
+        // Find end of this function (next function label or significant gap)
+        for (let i = startIndex + 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (line.endsWith(':') && !line.startsWith('.') && line !== functionLabel + ':') {
+                endIndex = i;
+                break;
+            }
+            // Stop at empty line followed by label-like pattern
+            if (!line && i + 1 < lines.length) {
+                const nextLine = lines[i + 1].trim();
+                if (nextLine.endsWith(':') && !nextLine.startsWith('.')) {
+                    endIndex = i;
+                    break;
+                }
+            }
+        }
+
+        return lines.slice(startIndex, endIndex).join('\n');
+    }
+
+    private formatMLResults(data: any, parsedAsm: any, fullAsmText: string): ResultLine[] {
         const output: ResultLine[] = [];
 
         // Statistics for summary
@@ -161,23 +271,43 @@ export class LociTool extends BaseTool {
 
                         // Track performance statistics for summary
                         if (previousPrediction) {
-                            const execTimeChangePercent =
-                                ((currentExecTime - previousPrediction.execTime) / previousPrediction.execTime) * 100;
-                            if (Math.abs(execTimeChangePercent) < 0.1) {
+                            // Use the same rounding as display logic to avoid inconsistencies
+                            const roundedCurrent = Number.parseFloat(currentExecTime.toFixed(0));
+                            const roundedPrevious = Number.parseFloat(previousPrediction.execTime.toFixed(0));
+
+                            if (roundedCurrent === roundedPrevious) {
                                 unchangedFunctions++;
-                            } else if (execTimeChangePercent < 0) {
-                                improvedFunctions++;
                             } else {
-                                degradedFunctions++;
+                                const execTimeChangePercent =
+                                    ((roundedCurrent - roundedPrevious) / roundedPrevious) * 100;
+                                if (execTimeChangePercent < 0) {
+                                    improvedFunctions++;
+                                } else {
+                                    degradedFunctions++;
+                                }
                             }
                         }
 
+                        // Extract function-specific assembly
+                        const currentFunctionAsm = this.extractFunctionAssembly(parsedAsm, cleanLabel, fullAsmText);
+
                         // Update prediction history for next run
-                        this.updatePredictionHistory(cleanLabel, currentStd, currentExecTime);
+                        this.updatePredictionHistory(cleanLabel, currentStd, currentExecTime, currentFunctionAsm);
 
                         output.push({
                             text: ` ${cleanLabel.padEnd(25)}  ${`${execTimeText} ns`.padEnd(10)}${execTimeChange}`,
                         });
+
+                        // Show assembly diff if there are performance changes and previous data exists
+                        if (previousPrediction && execTimeChange && !execTimeChange.includes('no change')) {
+                            const assemblyDiff = this.formatAssemblyDiff(
+                                currentFunctionAsm,
+                                previousPrediction.asmText,
+                            );
+                            assemblyDiff.forEach(diffLine => {
+                                output.push({text: diffLine});
+                            });
+                        }
                         // output.push({
                         //     text: `    📈 Standard Deviation: ${stdText} ns${stdChange}`,
                         // });
@@ -297,7 +427,7 @@ export class LociTool extends BaseTool {
             const mlResults = await this.callMLModelAPI(asmText);
 
             // Format results for display
-            const formattedResults = this.formatMLResults(mlResults);
+            const formattedResults = this.formatMLResults(mlResults, parsedAsm, asmText);
 
             return {
                 id: this.tool.id,
