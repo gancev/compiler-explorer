@@ -202,17 +202,18 @@ export class LociTool extends BaseTool {
             return lines.slice(startLine, startLine + 10).join('\n');
         }
 
-        // Find end of this function (next function label or significant gap)
+        // Find end of this function (next function label, data section label, or significant gap)
         for (let i = startIndex + 1; i < lines.length; i++) {
             const line = lines[i].trim();
-            if (line.endsWith(':') && !line.startsWith('.') && line !== functionLabel + ':') {
+            // Stop at any label ending with ':' - this includes both function labels and data section labels like .LC0:
+            if (line.endsWith(':') && line !== functionLabel + ':') {
                 endIndex = i;
                 break;
             }
             // Stop at empty line followed by label-like pattern
             if (!line && i + 1 < lines.length) {
                 const nextLine = lines[i + 1].trim();
-                if (nextLine.endsWith(':') && !nextLine.startsWith('.')) {
+                if (nextLine.endsWith(':')) {
                     endIndex = i;
                     break;
                 }
