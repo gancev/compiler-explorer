@@ -304,6 +304,68 @@ export class Cfg extends Pane<CfgState> {
         this.selectFunction(this.state.selectedFunction);
     }
 
+    private async callMLModelAPI(asmText: string): Promise<any> {
+        try {
+            // Make the API call to our server endpoint
+            const response = await fetch('http://localhost:10240/api/ml-model/invocations', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'text/plain',
+                },
+                body: asmText,
+            });
+
+            if (!response.ok) {
+                throw new Error(`API returned ${response.status}: ${response.statusText}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('Error calling ML model API:', error);
+            throw error;
+        }
+    }
+
+    private async analyzeWithML(fn: CfgDescriptor): Promise<{totalTime: number; blockResults: Record<string, any>}> {
+        try {
+            const startTime = performance.now();
+            const blockResults: Record<string, any> = {};
+
+            // Process each basic block individually
+            for (const node of fn.nodes) {
+                try {
+                    const blockResult = await this.callMLModelAPI(node.label);
+                    // Parse the ML result and extract execution time
+                    if (
+                        blockResult?.result?.data &&
+                        Array.isArray(blockResult.result.data) &&
+                        blockResult.result.data.length > 0
+                    ) {
+                        const dataArray = blockResult.result.data[0]; // Get first row
+                        if (Array.isArray(dataArray) && dataArray.length > 1) {
+                            const executionTime = dataArray[1]; // Second element is execution time
+                            const roundedTime = Math.round(executionTime);
+                            blockResults[node.id] = `Execution-time: ${roundedTime} ns`;
+                        } else {
+                            blockResults[node.id] = 'No timing data';
+                        }
+                    } else {
+                        blockResults[node.id] = 'Invalid result format';
+                    }
+                } catch (error) {
+                    console.error(`ML analysis failed for block ${node.id}:`, error);
+                    blockResults[node.id] = 'Analysis failed';
+                }
+            }
+
+            const totalTime = performance.now() - startTime;
+            return {totalTime, blockResults};
+        } catch (error) {
+            console.error('ML analysis failed:', error);
+            return {totalTime: 0, blockResults: {}};
+        }
+    }
+
     async exportPNG() {
         fileSaver.saveAs(await this.createPNG(), 'cfg.png');
     }
@@ -368,7 +430,7 @@ export class Cfg extends Pane<CfgState> {
         }
     }
 
-    async createBasicBlocks(fn: CfgDescriptor) {
+    async createBasicBlocks(fn: CfgDescriptor, mlResults?: Record<string, any>) {
         for (const node of fn.nodes) {
             const div = document.createElement('div');
             div.classList.add('block');
@@ -405,7 +467,18 @@ export class Cfg extends Pane<CfgState> {
                         .replace(/>(\s|&nbsp;)<\/span>/, '></span>') // Hacky solution to remove whitespace at the start
                 }" aria-describedby="wtf">&#8943;</span>`;
             }
-            div.innerHTML = lines.join('<br/>');
+
+            // Add ML results on top if available
+            let blockContent = lines.join('<br/>');
+            if (mlResults?.[node.id]) {
+                const mlResult = mlResults[node.id];
+                const mlResultText = typeof mlResult === 'string' ? mlResult : JSON.stringify(mlResult);
+                blockContent =
+                    `<div style="background-color: #e3f2fd; padding: 4px; margin-bottom: 4px; border-radius: 3px; font-size: 11px; color: #1565c0;">${escapeHTML(mlResultText)}</div>` +
+                    blockContent;
+            }
+
+            div.innerHTML = blockContent;
             for (const foldElement of div.getElementsByClassName('fold')) {
                 const fold = foldElement as HTMLElement;
 
@@ -532,13 +605,17 @@ export class Cfg extends Pane<CfgState> {
         }
         const fn = this.results[name];
         this.bbMap = {};
-        await this.createBasicBlocks(fn);
+
+        // Get ML analysis results first
+        const mlAnalysis = await this.analyzeWithML(fn);
+
+        await this.createBasicBlocks(fn, mlAnalysis.blockResults);
         this.layout = new GraphLayoutCore(fn as AnnotatedCfgDescriptor, !!this.state.centerparents);
         this.applyLayout();
         this.drawEdges();
         this.infoElement.innerHTML = `Layout time: ${Math.round(this.layout.layoutTime)}ms<br/>Basic blocks: ${
             fn.nodes.length
-        }`;
+        }<br/>ML Analysis: ${Math.round(mlAnalysis.totalTime)}ms`;
         this.estimatedPNGSize.innerHTML = `(~${size_to_human(
             this.layout.getWidth() * this.layout.getHeight() * 4 * EST_COMPRESSION_RATIO,
         )})`;

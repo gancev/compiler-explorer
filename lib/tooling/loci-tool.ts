@@ -151,7 +151,7 @@ export class LociTool extends BaseTool {
                     diffLines.push(`  🔴 ${prevPadded}\t-`);
                 } else if (!previousLine && currentLine) {
                     // Line added
-                    diffLines.push(`  - \t\t\t\t\t🟢 ${currentLine}`);
+                    diffLines.push(`  -                                  	\t\t\t\t🟢 ${currentLine}`);
                 } else {
                     // Line changed
                     diffLines.push(`  🔴 ${prevPadded}\t🟢 ${currentLine}`);
